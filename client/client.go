@@ -78,6 +78,7 @@ func (c *Client) sendWorkloadRequest(numRetries int) {
 	req.Close = true
 
 	resp, err := c.httpClient.Do(req)
+	rqEnd := time.Now()
 	latency := time.Since(rqStart)
 
 	// Handle timeouts and report error otherwise.
@@ -87,11 +88,21 @@ func (c *Client) sendWorkloadRequest(numRetries int) {
 
 			// Directly measuring timeouts because we only care about the point-in-time
 			// the request that timed out was sent.
-			c.statsMgr.DirectMeasurement("client.rq.timeout", rqStart, 1.0, c.tid)
+			c.statsMgr.DirectMeasurement("client.rq.timeout_origin", rqStart, 1.0, c.tid)
+			c.statsMgr.DirectMeasurement("client.rq.timeout", rqEnd, 1.0, c.tid)
+			c.statsMgr.Incr("client.rq.failure.count", c.tid)
 		} else {
 			c.log.Errorw("request error", "error", err, "client", c.tid)
+			c.statsMgr.Incr("client.rq.failure.count", c.tid)
 		}
-		c.statsMgr.Incr("client.rq.failure.count", c.tid)
+		// Retry logic
+		if numRetries > 0 {
+			go func() {
+				time.Sleep(1 * time.Second) // retry backoff for a static time
+				c.statsMgr.Incr("client.rq.retry.count", c.tid)
+				c.sendWorkloadRequest(numRetries - 1)
+			}()
+		}
 		return
 	}
 	resp.Body.Close()
@@ -106,7 +117,8 @@ func (c *Client) sendWorkloadRequest(numRetries int) {
 		c.statsMgr.DirectMeasurement("client.rq.503", rqStart, 1.0, c.tid)
 		c.statsMgr.Incr("client.rq.failure.count", c.tid)
 	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
-		c.statsMgr.DirectMeasurement("client.rq.timeout", rqStart, 1.0, c.tid)
+		c.statsMgr.DirectMeasurement("client.rq.timeout_origin", rqStart, 1.0, c.tid)
+		c.statsMgr.DirectMeasurement("client.rq.timeout", rqEnd, 1.0, c.tid)
 	default:
 		c.log.Fatalw("wtf is this", "status", resp.StatusCode, "resp", resp, "client", c.tid)
 	}
@@ -123,6 +135,7 @@ func (c *Client) processWorkloadStage(ws WorkloadStage) {
 	// an integral type to a time.Duration since time.Duration is an int64 behind
 	// the scenes.
 	requestSpacing := time.Second / time.Duration(ws.RPS)
+	c.log.Infow("client workload stage started", "client", c.tid, "rps", ws.RPS, "duration", ws.Duration, "spacing", requestSpacing)
 	ticker := time.NewTicker(requestSpacing)
 
 	var wg sync.WaitGroup

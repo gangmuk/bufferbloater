@@ -188,7 +188,8 @@ func (bb *Bufferbloater) Run() {
 	var statsWg sync.WaitGroup
 	statsWg.Add(1)
 
-	go bb.statsMgr.PeriodicStatsCollection(500*time.Millisecond, stopStats, &statsWg)
+	// go bb.statsMgr.PeriodicStatsCollection(500*time.Millisecond, stopStats, &statsWg) // the period should be reflected in generate_reporty.py
+	go bb.statsMgr.PeriodicStatsCollection(1000*time.Millisecond, stopStats, &statsWg)
 
 	var wg sync.WaitGroup
 
