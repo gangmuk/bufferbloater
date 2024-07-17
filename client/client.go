@@ -2,9 +2,13 @@ package client
 
 import (
 	"fmt"
+	"math"
+	"math/rand"
 	"net"
 	"net/http"
+	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -22,11 +26,18 @@ type Target struct {
 	Port    uint
 }
 
+type RetryConfig struct {
+	Count       int
+	Factor      int
+	Base        time.Duration
+	MaxInterval time.Duration
+}
+
 type Config struct {
 	Workload       []WorkloadStage
 	RequestTimeout time.Duration
+	Retry          RetryConfig
 	TargetServer   Target
-	RetryCount     int
 }
 
 type Client struct {
@@ -37,6 +48,12 @@ type Client struct {
 
 	// Tenant ID.
 	tid uint
+}
+
+var requestCounter uint64
+
+func (c *Client) generateRequestID() string {
+	return fmt.Sprintf("%d-%d", c.tid, atomic.AddUint64(&requestCounter, 1))
 }
 
 func NewClient(tenantId uint, config Config, logger *zap.SugaredLogger, sm *stats.StatsMgr) *Client {
@@ -57,8 +74,9 @@ func NewClient(tenantId uint, config Config, logger *zap.SugaredLogger, sm *stat
 	return &c
 }
 
-func (c *Client) sendWorkloadRequest(numRetries int) {
-	if numRetries < 0 {
+func (c *Client) sendWorkloadRequest(maxRetry int, numRetries int, requestID string) {
+	remainingRetry := maxRetry - numRetries
+	if remainingRetry < 0 {
 		return
 	}
 
@@ -84,23 +102,38 @@ func (c *Client) sendWorkloadRequest(numRetries int) {
 	// Handle timeouts and report error otherwise.
 	if err != nil {
 		if err, ok := err.(net.Error); ok && err.Timeout() {
-			c.log.Warnw("request timed out", "client", c.tid)
+			c.log.Warnw("request timed outt", "client", c.tid)
 
 			// Directly measuring timeouts because we only care about the point-in-time
 			// the request that timed out was sent.
 			c.statsMgr.DirectMeasurement("client.rq.timeout_origin", rqStart, 1.0, c.tid)
 			c.statsMgr.DirectMeasurement("client.rq.timeout", rqEnd, 1.0, c.tid)
-			c.statsMgr.Incr("client.rq.failure.count", c.tid)
+			c.statsMgr.Incr("client.rq.timeout.count", c.tid)
 		} else {
-			c.log.Errorw("request error", "error", err, "client", c.tid)
-			c.statsMgr.Incr("client.rq.failure.count", c.tid)
+			// c.log.Errorw("request error", "error", err, "client", c.tid)
+			c.statsMgr.Incr("client.rq.non_timeout_error.count", c.tid)
 		}
+		c.statsMgr.Incr("client.rq.failure.count", c.tid)
 		// Retry logic
-		if numRetries > 0 {
+		// c.log.Warnw("retry logic", "maxRetry", maxRetry,
+		// 	"numRetries", numRetries,
+		// 	"remainingRetry", remainingRetry,
+		// 	"client", c.tid)
+		if remainingRetry > 0 {
+			// c.log.Warnw("Retry entry", "requestID", requestID, "client", c.tid)
 			go func() {
-				time.Sleep(1 * time.Second) // retry backoff for a static time
+				// Calculate backoff time for retry
+				numRetries += 1
+				waitTime := c.config.Retry.Base * time.Duration(math.Pow(float64(c.config.Retry.Factor), float64(numRetries-1)))
+				jitter := 0.5
+				jitterTime := time.Duration(rand.Float64() * jitter * float64(waitTime))
+				waitTime += jitterTime
+				waitTime = time.Duration(math.Min(float64(waitTime), float64(c.config.Retry.MaxInterval)))
+				// c.log.Warnw("backoff start", "requestID", requestID, "num", numRetries, "waitTime", waitTime, "client", c.tid)
+				time.Sleep(waitTime)
+				c.log.Warnw("backoff done, send retry", "requestID", requestID, "numRetries", numRetries, "waitTime", waitTime)
 				c.statsMgr.Incr("client.rq.retry.count", c.tid)
-				c.sendWorkloadRequest(numRetries - 1)
+				c.sendWorkloadRequest(maxRetry, numRetries, requestID)
 			}()
 		}
 		return
@@ -123,10 +156,14 @@ func (c *Client) sendWorkloadRequest(numRetries int) {
 		c.log.Fatalw("wtf is this", "status", resp.StatusCode, "resp", resp, "client", c.tid)
 	}
 
-	if numRetries > 0 {
-		c.statsMgr.Incr("client.rq.retry.count", c.tid)
-		go c.sendWorkloadRequest(numRetries - 1)
-	}
+	c.log.Fatalw("SHOULD NOT BE REACHED")
+	os.Exit(1)
+
+	// if remainingRetry > 0 {
+	// 	numRetries += 1
+	// 	c.statsMgr.Incr("client.rq.retry.count", c.tid)
+	// 	go c.sendWorkloadRequest(maxRetry, numRetries)
+	// }
 }
 
 func (c *Client) processWorkloadStage(ws WorkloadStage) {
@@ -148,8 +185,10 @@ func (c *Client) processWorkloadStage(ws WorkloadStage) {
 			case <-done:
 				return
 			case <-ticker.C:
+				numRetries := 0
+				requestID := c.generateRequestID()
 				c.statsMgr.Set("client.rps", float64(ws.RPS), c.tid)
-				go c.sendWorkloadRequest(c.config.RetryCount)
+				go c.sendWorkloadRequest(c.config.Retry.Count, numRetries, requestID)
 			}
 		}
 	}(&wg)

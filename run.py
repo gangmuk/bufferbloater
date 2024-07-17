@@ -10,7 +10,7 @@ if __name__ == "__main__":
         exit(1)
     # now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     # output_dir = f"output/{now}-{output_posfix}"
-    output_dir = f"output/{output_posfix}"
+    output_dir = f"{output_posfix}"
     os.system(f"mkdir -p {output_dir}")
     os.system(f"./bin/bufferbloater -config {config_path} -data_dir {output_dir}")
     os.system(f"python generate_report.py {output_dir}")

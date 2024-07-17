@@ -28,12 +28,21 @@ type clientConfig struct {
 		Rps      uint
 		Duration string
 	} `yaml:"workload"`
-	RqTimeout    string `yaml:"rq_timeout"`
+
+	RqTimeout string `yaml:"rq_timeout"`
+
 	TargetServer struct {
 		Address string
 		Port    uint
 	} `yaml:"target_server"`
-	RetryCount int `yaml:"retry_count"`
+
+	// RetryCount int `yaml:"retry_count"`
+	Retry struct {
+		Count       int
+		Factor      int
+		Base        string
+		MaxInterval string
+	} `yaml:"retry"`
 }
 
 type serverConfig struct {
@@ -57,13 +66,25 @@ type parsedYamlConfig struct {
 // Creates a properly typed client config.
 func clientConfigParse(cc clientConfig) (client.Config, error) {
 	// TODO: validate config
-
+	backoffbase, err := time.ParseDuration(cc.Retry.Base)
+	if err != nil {
+		return client.Config{}, err
+	}
+	backoffmaxinterval, err := time.ParseDuration(cc.Retry.MaxInterval)
+	if err != nil {
+		return client.Config{}, err
+	}
 	conf := client.Config{
 		TargetServer: client.Target{
 			Address: cc.TargetServer.Address,
 			Port:    cc.TargetServer.Port,
 		},
-		RetryCount: cc.RetryCount,
+		Retry: client.RetryConfig{
+			Count:       cc.Retry.Count,
+			Factor:      cc.Retry.Factor,
+			Base:        backoffbase,
+			MaxInterval: backoffmaxinterval,
+		},
 	}
 
 	d, err := time.ParseDuration(cc.RqTimeout)

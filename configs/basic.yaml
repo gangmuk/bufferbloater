@@ -2,12 +2,16 @@ clients:
   - workload:
     - rps: 100
       duration: 10s
-    - rps: 500
+    - rps: 480
       duration: 3s
     - rps: 100
       duration: 8s
     rq_timeout: 3s
-    retry_count: 1
+    retry: 
+      count: 3
+      factor: 2
+      base: 1s
+      maxinterval: 5s
     target_server:
       address: 127.0.0.1
       port: 9002

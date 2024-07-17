@@ -78,9 +78,13 @@ for i in range(1):
     goodput_y = list(map(lambda x: x / dt, goodput_y))
 
     # print(f"{in_rq_rate_x}, {out_rq_rate_x}, {rq_latency_x}, {goodput_x}")
+    
+    ymax = max(in_rq_rate_y + rq_latency_y + goodput_y + failure_y + retry_rate_y)
+    print("ymax", ymax)
+    
     xstart = min(in_rq_rate_x + out_rq_rate_x + rq_latency_x + goodput_x + failure_x + timeout_x + timeout_origin_x)
+    xend = (max(in_rq_rate_x + out_rq_rate_x + rq_latency_x + goodput_x + failure_x + timeout_x + timeout_origin_x) - xstart)/1e9
     # xend = 60
-    xend = (max(in_rq_rate_x + out_rq_rate_x + rq_latency_x + goodput_x) - xstart)/1e9
     
     adjusted_rq_latency_endtime = [adjusted_start_time+latency for adjusted_start_time, latency in zip(adjust(rq_latency_x), rq_latency_y)]
 
@@ -95,6 +99,7 @@ for i in range(1):
     ax1.set_xlim([0,xend])
     ax1.set_ylim([0,max(rq_latency_y)*1.3])
     ax1.legend(fontsize=legend_fontsize)
+    # ax1.yaxis.set_major_locator(plt.MultipleLocator(1))
 
     ax2.set_xlabel('Time (s)', fontsize=xlabel_fontsize)
     ax2.set_ylabel('Offered Load', fontsize=ylabel_fontsize)
@@ -106,23 +111,23 @@ for i in range(1):
     #         ax2.axvline(tx, color="pink", linestyle="-", alpha=0.7)
             
     if len(timeout_x) > 0:
-        ax2.axvline(adjust(timeout_x)[0], color="red", linestyle="-", alpha=0.7, label="timeout")
+        ax2.axvline(adjust(timeout_x)[0], ymin=0.5, ymax=0.1, color="red", linestyle="-", alpha=0.7, label="timeout")
         quantized_timeout_x = [round(tx, 1) for tx in adjust(timeout_x)]  # Quantize timeout x values to 0.1s intervals
         timeout_counts = Counter(quantized_timeout_x)
         max_count = max(timeout_counts.values())
         for tx, count in timeout_counts.items():
             alpha_value = min(1.0, count / max_count * 0.9 + 0.2)
-            ax2.axvline(tx, color="red", linestyle="-", alpha=alpha_value)
+            ax2.axvline(tx, ymin=0.5, ymax=1.0, color="red", linestyle="-", alpha=alpha_value)
     if len(timeout_origin_x) > 0:
-        ax2.axvline(adjust(timeout_origin_x)[0], color="orange", linestyle="-", alpha=0.7, label="timeout_origin")
+        ax2.axvline(adjust(timeout_origin_x)[0], ymin=0.0, ymax=0.5, color="orange", linestyle="-", alpha=0.7, label="timeout_origin")
         quantized_timeout_origin_x = [round(tx, 1) for tx in adjust(timeout_origin_x)]
         timeout_counts = Counter(quantized_timeout_origin_x)
         max_count = max(timeout_counts.values())
         for tx, count in timeout_counts.items():
             alpha_value = min(1.0, count / max_count * 0.9 + 0.2)
-            ax2.axvline(tx, color="orange", linestyle="-", alpha=alpha_value)
+            ax2.axvline(tx, ymin=0.0, ymax=0.5, color="orange", linestyle="-", alpha=alpha_value)
     
-    ax2.plot(adjust(in_rq_rate_x),in_rq_rate_y, label="inbound load")
+    ax2.plot(adjust(in_rq_rate_x), in_rq_rate_y, label="load")
     ax2.plot(adjust(goodput_x), goodput_y, color="green", label="goodput", marker='^')
     ax2.plot(adjust(failure_x), failure_y, color="black", label="failure", linestyle="--", marker='o')
     ax2.plot(adjust(retry_rate_x),retry_rate_y, color="cyan", label="retries", marker='x', linestyle=":")
@@ -130,8 +135,10 @@ for i in range(1):
     ax2.tick_params(axis='x', labelsize=xtick_fontsize)
     ax2.tick_params(axis='y', labelsize=ytick_fontsize)
     ax2.set_xlim([0,xend])
-    ax2.set_ylim([-50,max(max(in_rq_rate_y), max(goodput_y))*1.3])
-    ax2.legend(fontsize=legend_fontsize)
+    ax2.set_ylim([-50,ymax*1.3])
+    ax2.yaxis.set_major_locator(plt.MultipleLocator(100))
+    ax2.grid(True)
+    ax2.legend(fontsize=legend_fontsize, ncol=2)
 
     # ax3.set_xlabel('Time (s)', fontsize=xlabel_fontsize)
     # ax3.set_ylabel("Timeout", fontsize=ylabel_fontsize)
